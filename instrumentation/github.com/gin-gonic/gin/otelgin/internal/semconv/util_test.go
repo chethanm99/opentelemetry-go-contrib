@@ -7,6 +7,7 @@
 package semconv
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -73,5 +74,82 @@ func TestStandardizeHTTPMethod(t *testing.T) {
 	}
 	for _, test := range tests {
 		assert.Equal(t, test.want, standardizeHTTPMethod(test.method))
+	}
+}
+
+func TestMethodLookupFromEnv(t *testing.T) {
+	tests := []struct {
+		name    string
+		methods []string
+		want    []string
+	}{
+		{
+			name: "default methods",
+			want: []string{
+				"CONNECT", "DELETE", "GET", "HEAD", "OPTIONS",
+				"PATCH", "POST", "PUT", "TRACE", "QUERY",
+			},
+		},
+		{
+			name:    "custom methods replace defaults",
+			methods: []string{"FOO", "BAR"},
+			want:    []string{"FOO", "BAR"},
+		},
+		{
+			name:    "empty override",
+			methods: []string{""},
+			want:    []string{},
+		},
+		{
+			name:    "case sensitive methods",
+			methods: []string{"get", "FOO"},
+			want:    []string{"get", "FOO"},
+		},
+		{
+			name:    "empty entries are ignored",
+			methods: []string{"GET", "", "POST"},
+			want:    []string{"GET", "POST"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := methodLookupFromEnv(tt.methods)
+			assert.Len(t, got, len(tt.want))
+
+			for _, method := range tt.want {
+				assert.Contains(t, got, method)
+			}
+		})
+	}
+}
+
+func TestNewMethodLookupReadsEnvironment(t *testing.T) {
+	t.Setenv(knownHTTPMethodsEnv, "GET,FOO")
+
+	lookup := newMethodLookup()
+	assert.Contains(t, lookup, "GET")
+	assert.Contains(t, lookup, "FOO")
+	assert.NotContains(t, lookup, "POST")
+
+	t.Setenv(knownHTTPMethodsEnv, "")
+
+	lookup = newMethodLookup()
+	assert.Empty(t, lookup)
+}
+
+func TestNewMethodLookupUsesDefaultsWhenEnvironmentIsUnset(t *testing.T) {
+	// t.Setenv restores the original environment when the test finishes.
+	t.Setenv(knownHTTPMethodsEnv, "TEMP")
+
+	if err := os.Unsetenv(knownHTTPMethodsEnv); err != nil {
+		t.Fatal(err)
+	}
+
+	lookup := newMethodLookup()
+
+	assert.Len(t, lookup, len(defaultKnownHTTPMethods))
+	for _, method := range defaultKnownHTTPMethods {
+		assert.Contains(t, lookup, method)
 	}
 }

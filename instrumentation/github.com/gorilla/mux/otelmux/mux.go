@@ -88,29 +88,15 @@ type traceware struct {
 	metricAttributesFn func(*http.Request) []attribute.KeyValue
 }
 
-// validMethods are all the OTel recognized HTTP methods.
-var validMethods = map[string]struct{}{
-	http.MethodGet:     {},
-	http.MethodHead:    {},
-	http.MethodPost:    {},
-	http.MethodPut:     {},
-	http.MethodPatch:   {},
-	http.MethodDelete:  {},
-	http.MethodConnect: {},
-	http.MethodOptions: {},
-	http.MethodTrace:   {},
-	"QUERY":            {},
-}
-
 // defaultSpanNameFunc returns the semconv based default span name.
 func defaultSpanNameFunc(routeName string, r *http.Request) string {
 	return normalizeMethod(r.Method, "HTTP") + " " + routeName
 }
 
-// normalizeMethod returns m if it is a known HTTP method,
+// normalizeMethod returns m if it is a configured known HTTP method,
 // otherwise fallback.
 func normalizeMethod(m, fallback string) string {
-	if _, ok := validMethods[m]; !ok {
+	if !semconv.IsKnownHTTPMethod(m) {
 		return fallback
 	}
 	return m

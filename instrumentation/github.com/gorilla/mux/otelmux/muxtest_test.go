@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -937,4 +939,63 @@ func TestResponseBodySizeReadFrom(t *testing.T) {
 		return
 	}
 	t.Fatal("http.server.response.body.size metric not recorded")
+}
+
+func TestConfiguredKnownHTTPMethodsAffectSpanNames(t *testing.T) {
+	const (
+		methodsEnv = "OTEL_INSTRUMENTATION_HTTP_KNOWN_METHODS"
+		helperEnv  = "OTELMUX_CONFIGURED_METHODS_TEST_HELPER"
+	)
+
+	if os.Getenv(helperEnv) != "1" {
+		cmd := exec.Command(
+			os.Args[0],
+			"-test.run=^TestConfiguredKnownHTTPMethodsAffectSpanNames$",
+		)
+
+		env := make([]string, 0, len(os.Environ())+2)
+		for _, entry := range os.Environ() {
+			if strings.HasPrefix(entry, methodsEnv+"=") ||
+				strings.HasPrefix(entry, helperEnv+"=") {
+				continue
+			}
+			env = append(env, entry)
+		}
+
+		cmd.Env = append(env, methodsEnv+"=FOO", helperEnv+"=1")
+
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+		return
+	}
+
+	sr := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(sr),
+	)
+
+	router := mux.NewRouter()
+	router.Use(otelmux.Middleware(
+		"foobar",
+		otelmux.WithTracerProvider(provider),
+	))
+	router.HandleFunc("/custom", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for _, method := range []string{"FOO", http.MethodGet} {
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			method,
+			"http://localhost/custom",
+			http.NoBody,
+		)
+		router.ServeHTTP(httptest.NewRecorder(), req)
+	}
+
+	spans := sr.Ended()
+	require.Len(t, spans, 2)
+
+	assert.Equal(t, "FOO /custom", spans[0].Name())
+	assert.Equal(t, "HTTP /custom", spans[1].Name())
 }
